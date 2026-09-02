@@ -1,0 +1,9 @@
+# SwiftPM build artifacts
+.build/
+
+# macOS
+.DS_Store
+
+# Editor / OS junk
+*.swp
+*~
