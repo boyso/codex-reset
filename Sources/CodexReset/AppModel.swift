@@ -307,19 +307,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// 刷新暂停对话列表；新出现的暂停对话自动勾选，用户手动取消的保持取消
-    private var lastPausedIds: Set<String> = []
-
-    private func refreshPausedThreads() {
-        let threads = reader.usageLimitedThreads()
-        let ids = Set(threads.map { $0.threadId })
-        pausedThreads = threads
-        if selectedThreadIds.isEmpty {
-            selectedThreadIds = ids
-        } else {
-            selectedThreadIds.formUnion(ids.subtracting(lastPausedIds))
-        }
-        lastPausedIds = ids
+    /// 刷新暂停对话列表（不自动勾选；勾选完全由用户控制）
+    func refreshPausedThreads() {
+        pausedThreads = reader.usageLimitedThreads()
     }
 
     /// 刷新「全部对话」列表（面板每次打开时调用）

@@ -116,21 +116,12 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack {
-            Toggle(isOn: Binding(
-                get: { model.remoteControlEnabled },
-                set: { model.setRemoteControl($0) }
-            )) {
-                Text("remote_control")
-                    .font(.caption)
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .help("写入 config.toml，重启 Codex 桌面 app 后生效。开启后走官方协议直接继续对话（无需辅助功能权限）")
             Spacer()
-            Button("退出") {
+            Button("退出 CodexReset") {
                 model.quit()
             }
             .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -240,11 +231,12 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if !model.pausedThreads.isEmpty {
-                    Button(model.selectedThreadIds.count == model.pausedThreads.count ? "取消全选" : "全选") {
-                        if model.selectedThreadIds.count == model.pausedThreads.count {
-                            model.selectedThreadIds = []
+                    let pausedIds = Set(model.pausedThreads.map { $0.threadId })
+                    Button(pausedIds.isSubset(of: model.selectedThreadIds) ? "取消全选" : "全选") {
+                        if pausedIds.isSubset(of: model.selectedThreadIds) {
+                            model.selectedThreadIds.subtract(pausedIds)
                         } else {
-                            model.selectedThreadIds = Set(model.pausedThreads.map { $0.threadId })
+                            model.selectedThreadIds.formUnion(pausedIds)
                         }
                     }
                     .font(.caption)
@@ -297,9 +289,17 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("用量恢复后自动继续勾选的对话")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                if !model.allThreads.isEmpty {
+                    let allIds = Set(model.allThreads.map { $0.threadId })
+                    Button(allIds.isSubset(of: model.selectedThreadIds) ? "取消全选" : "全选") {
+                        if allIds.isSubset(of: model.selectedThreadIds) {
+                            model.selectedThreadIds.subtract(allIds)
+                        } else {
+                            model.selectedThreadIds.formUnion(allIds)
+                        }
+                    }
+                    .font(.caption)
+                }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
@@ -360,31 +360,87 @@ struct ContentView: View {
         hint.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
     }
 
-    // MARK: - 控制
+    // MARK: - 控制（轻拟物主卡片）
+
+    /// 轻拟物卡片：顶部高光渐变 + 细描边 + 柔和投影
+    private func softCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10, content: content)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.11), Color.white.opacity(0.035)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.22), Color.white.opacity(0.06)],
+                            startPoint: .top, endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
+    }
 
     private var controlsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("用量恢复后自动继续", isOn: $model.autoContinue)
-                .font(.subheadline)
-            HStack {
+        softCard {
+            // 主开关：用量恢复后自动继续
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.clockwise.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(autoContinueOn ? highlightOrange : Color.gray)
+                    .shadow(color: highlightOrange.opacity(0.5), radius: autoContinueOn ? 6 : 0)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("用量恢复后自动继续")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text("用量窗口重置后，自动把指令发送到已勾选的对话")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("", isOn: $model.autoContinue)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            // 指令 + 立即继续
+            HStack(spacing: 8) {
                 Text("指令")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
                 TextField("继续", text: $model.continueCommand)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 160)
+                    .frame(maxWidth: 150)
                 Spacer()
                 Button {
                     Task { await model.manualContinue() }
                 } label: {
                     if model.isWorking {
                         ProgressView().controlSize(.small)
+                            .frame(width: 88)
                     } else {
-                        Text("立即继续")
+                        Label("立即继续", systemImage: "paperplane.fill")
+                            .font(.caption)
+                            .frame(width: 88)
                     }
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(highlightOrange)
                 .disabled(model.isWorking)
             }
-            // 辅助功能状态：仅 GUI 兜底通道需要；已授权 / 未授权 + 手动授权按钮（不自动弹设置）
+
+            // 辅助功能状态（仅 GUI 兜底通道需要）
             HStack(spacing: 6) {
                 if model.accessibilityAuthorized {
                     Label("辅助功能已授权", systemImage: "checkmark.circle.fill")
@@ -403,8 +459,28 @@ struct ContentView: View {
                     .foregroundStyle(.tertiary)
             }
             .font(.caption)
+
+            // remote_control 开关（副标题说明）
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle(isOn: Binding(
+                    get: { model.remoteControlEnabled },
+                    set: { model.setRemoteControl($0) }
+                )) {
+                    Text("remote_control")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                Text("通过 Codex 本地协议继续对话：重启 Codex 后生效，无需辅助功能授权")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
+
+    /// 自动继续开关状态（用于图标高亮）
+    private var autoContinueOn: Bool { model.autoContinue }
 
     // MARK: - 日志（默认收起，点击标题展开）
 

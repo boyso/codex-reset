@@ -30,8 +30,9 @@ several agents/projects at once, that's a lot of babysitting.
 - **Menu-bar status** — live 5h / 1w usage bars, next-reset countdown, plan
   type and credit balance at a glance.
 - **Auto-resume** — when the 5h window resets, CodexReset automatically sends
-  "继续" to every conversation you've checked (all paused conversations are
-  pre-selected by default).
+  "继续" to the conversations you've checked. Nothing is pre-selected: tick the
+  paused conversations you care about (or hit "select all"), or add any other
+  conversation from the full list.
 - **Browse all conversations** — every project and its conversations are listed
   (grouped by project, archived and sub-agent threads filtered out). Check any
   conversation, even one that isn't paused yet, to have it resumed too.
