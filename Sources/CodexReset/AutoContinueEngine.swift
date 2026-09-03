@@ -84,7 +84,7 @@ final class AutoContinueEngine {
     /// 已处理过的线程，避免重复继续
     private var handledThreads: Set<String> = []
 
-    var onLog: ((String) -> Void)?
+    var onLog: ((String, String) -> Void)?
     /// 需要重启 Codex 以启用 remote_control 时的回调（用于弹通知引导）
     var onNeedRestartCodex: (() -> Void)?
     /// 需要用户在系统设置授权辅助功能时的回调（不自动弹设置，由 UI 引导）
@@ -140,7 +140,8 @@ final class AutoContinueEngine {
             if AppleScriptAutomation.hasAccessibilityPermission() {
                 do {
                     try AppleScriptAutomation.sendContinue(threadId: threadId, command: command)
-                    onLog?("已通过 GUI 自动化发送「\(command)」（深链打开对话并粘贴）")
+                    onLog?("已通过 GUI 自动化发送「\(command)」（深链打开对话并粘贴）",
+                           "Sent \"\(command)\" via GUI automation (deep-linked into the chat and pasted)")
                     handledThreads.insert(threadId)
                     return true
                 } catch {
@@ -163,7 +164,7 @@ final class AutoContinueEngine {
         if let err = lastAttemptError {
             lastFailureReason = "\(lastError)（\(err)）"
         }
-        onLog?("继续失败：\(lastFailureReason ?? lastError)")
+        onLog?("继续失败：\(lastFailureReason ?? lastError)", "Continue failed: \(lastFailureReason ?? lastError)")
         return false
     }
 
@@ -171,19 +172,21 @@ final class AutoContinueEngine {
         do {
             // 1) resume 加载线程
             _ = try await client.request("thread/resume", params: ["threadId": threadId])
-            onLog?("已 resume 线程 \(threadId)")
+            onLog?("已 resume 线程 \(threadId)", "Resumed thread \(threadId)")
             // 2) 开启新轮次
             let result = try await client.requestDecoded("turn/start", params: [
                 "threadId": threadId,
                 "input": [["type": "text", "text": command]]
             ], as: TurnStartResult.self)
-            onLog?("turn/start 成功，turn 状态: \(result.turn.status)")
+            onLog?("turn/start 成功，turn 状态: \(result.turn.status)",
+                   "turn/start succeeded, turn status: \(result.turn.status)")
             // 3) 后台监控 turn 完成，完成后释放线程写锁（否则 Codex 桌面 app 无法打开该对话）
             let turnId = result.turn.id
             Task {
                 await Self.waitTurnCompletion(client: client, threadId: threadId, turnId: turnId)
                 try? await client.request("thread/unsubscribe", params: ["threadId": threadId])
-                onLog?("线程 \(threadId) 的 turn 已结束，已释放线程（Codex 可重新打开该对话）")
+                onLog?("线程 \(threadId) 的 turn 已结束，已释放线程（Codex 可重新打开该对话）",
+                       "Turn ended for thread \(threadId); thread released (Codex can reopen it)")
             }
             return true
         } catch {

@@ -1,6 +1,15 @@
 import Foundation
 import AppKit
 
+/// 一条日志：同时保存中英文，展示时按当前语言渲染（切换语言后旧日志也会跟随切换）
+struct LogEntry {
+    let time: String
+    let zh: String
+    let en: String
+    /// 按当前语言取展示文案
+    var display: String { L(zh, en) }
+}
+
 /// 全局应用状态与编排：连接 app-server → 轮询用量 → 定位暂停线程 → 到点自动继续
 @MainActor
 final class AppModel: ObservableObject {
@@ -13,7 +22,7 @@ final class AppModel: ObservableObject {
     @Published var allThreads: [PausedThread] = []
     /// 勾选、需要在恢复后自动继续的对话
     @Published var selectedThreadIds: Set<String> = []
-    @Published var logLines: [String] = []
+    @Published var logLines: [LogEntry] = []
     @Published var autoContinue: Bool {
         didSet { UserDefaults.standard.set(autoContinue, forKey: "autoContinue") }
     }
@@ -44,8 +53,8 @@ final class AppModel: ObservableObject {
         self.autoContinue = UserDefaults.standard.object(forKey: "autoContinue") as? Bool ?? true
         self.continueCommand = UserDefaults.standard.string(forKey: "continueCommand") ?? "继续"
         self.remoteControlEnabled = CodexConfig.load(codexHome: codexHome).remoteControlEnabled
-        engine.onLog = { [weak self] line in
-            Task { @MainActor in self?.appendLog(line) }
+        engine.onLog = { [weak self] zh, en in
+            Task { @MainActor in self?.appendLog(zh, en) }
         }
         engine.onNeedRestartCodex = { [weak self] in
             Task { @MainActor in self?.notifyRestartCodex() }
@@ -66,7 +75,7 @@ final class AppModel: ObservableObject {
     // MARK: - 启动
 
     func start() {
-        appendLog("CodexReset 启动，CODEX_HOME=\(codexHome)")
+        appendLog("CodexReset 启动，CODEX_HOME=\(codexHome)", "CodexReset started, CODEX_HOME=\(codexHome)")
         // 清理上次残留的 app-server 进程（app 异常退出后其子进程可能仍持有线程写锁）
         cleanupOrphanAppServers()
         // 暂停对话列表来自本地 sqlite，不依赖 app-server，立即加载
@@ -92,9 +101,9 @@ final class AppModel: ObservableObject {
             do {
                 try await desktop.initialize()
                 connectionMode = "desktop-control"
-                appendLog("已连接桌面 Codex app-server（remote-control）")
+                appendLog("已连接桌面 Codex app-server（remote-control）", "Connected to the desktop Codex app-server (remote-control)")
             } catch {
-                appendLog("桌面 control 初始化失败，改用独立实例: \(error)")
+                appendLog("桌面 control 初始化失败，改用独立实例: \(error)", "Desktop control init failed; falling back to a standalone instance: \(error)")
                 client = nil
                 await startOwnServerFallback()
             }
@@ -120,7 +129,7 @@ final class AppModel: ObservableObject {
             print("secondary.usedPercent=\(rl.rateLimits.secondary?.usedPercent ?? -1) resetsAt=\(rl.rateLimits.secondary?.resetsAt ?? 0) windowMins=\(rl.rateLimits.secondary?.windowDurationMins ?? 0)")
             print("reached=\(rl.rateLimits.rateLimitReachedType ?? "nil") credits=\(rl.rateLimits.credits?.balance ?? "nil")")
         }
-        for line in logLines { print("log: \(line)") }
+        for entry in logLines { print("log: [\(entry.time)] \(entry.display)") }
         refreshPausedThreads()
         print("pausedCount=\(pausedThreads.count)")
         for p in pausedThreads {
@@ -159,11 +168,12 @@ final class AppModel: ObservableObject {
         if CodexConfig.setRemoteControl(codexHome: codexHome, enabled: enabled) {
             remoteControlEnabled = enabled
             let v = enabled ? "true" : "false"
-            appendLog("已写入 [features] remote_control = \(v)，请重启 Codex 桌面 app 后生效")
+            appendLog("已写入 [features] remote_control = \(v)，请重启 Codex 桌面 app 后生效",
+                      "Wrote [features] remote_control = \(v); restart the Codex desktop app to take effect")
             notify(title: enabled ? "已启用 remote_control" : "已关闭 remote_control",
                    body: enabled ? "请重启 Codex 桌面 app，之后即可通过官方协议自动继续对话" : "已关闭，之后使用 app-server + GUI 兜底通道")
         } else {
-            appendLog("写入 config.toml 失败")
+            appendLog("写入 config.toml 失败", "Failed to write config.toml")
         }
     }
 
@@ -174,15 +184,17 @@ final class AppModel: ObservableObject {
             do {
                 try await own.initialize()
                 connectionMode = "own-server"
-                appendLog("已自起独立 app-server 实例")
+                appendLog("已自起独立 app-server 实例", "Started a standalone app-server instance")
             } catch {
                 connectionMode = "none"
-                appendLog("独立 app-server 初始化失败: \(error)")
+                appendLog("独立 app-server 初始化失败: \(error)", "Standalone app-server init failed: \(error)")
             }
         } catch {
             connectionMode = "none"
-            lastError = "app-server 启动失败: \(error)"
-            appendLog(lastError ?? "启动失败")
+            let zhMsg = "app-server 启动失败: \(error)"
+            let enMsg = "app-server failed to start: \(error)"
+            lastError = zhMsg
+            appendLog(zhMsg, enMsg)
         }
     }
 
@@ -223,7 +235,8 @@ final class AppModel: ObservableObject {
     }
 
     private func notifyRestartCodex() {
-        appendLog("remote_control 已启用但未生效：请重启 Codex 桌面 app，之后自动继续将走官方协议（无需辅助功能权限）")
+        appendLog("remote_control 已启用但未生效：请重启 Codex 桌面 app，之后自动继续将走官方协议（无需辅助功能权限）",
+                  "remote_control is enabled but not active yet: restart the Codex desktop app so auto-continue uses the official protocol (no accessibility permission needed)")
         notify(title: "请重启 Codex 桌面 app", body: "remote_control 已开启，重启后本 App 会自动切换到官方协议通道继续对话")
     }
 
@@ -238,12 +251,13 @@ final class AppModel: ObservableObject {
                 let old = client
                 client = desktop
                 connectionMode = "desktop-control"
-                appendLog("检测到 Codex remote-control socket，已切换到桌面 app-server 通道")
+                appendLog("检测到 Codex remote-control socket，已切换到桌面 app-server 通道",
+                          "Detected the Codex remote-control socket; switched to the desktop app-server channel")
                 old?.close()
                 manager.stopOwnServer()
                 await refreshRateLimits(client: desktop)
             } catch {
-                appendLog("连接桌面 control socket 失败: \(error)")
+                appendLog("连接桌面 control socket 失败: \(error)", "Failed to connect to the desktop control socket: \(error)")
             }
         }
     }
@@ -257,7 +271,7 @@ final class AppModel: ObservableObject {
             trackWindowReset(rl)
         } catch {
             lastError = "读取用量失败: \(error)"
-            appendLog("读取用量失败: \(error)")
+            appendLog("读取用量失败: \(error)", "Failed to read usage: \(error)")
         }
     }
 
@@ -290,7 +304,8 @@ final class AppModel: ObservableObject {
         saveResetHistory()
         let f = DateFormatter()
         f.dateFormat = "MM-dd HH:mm"
-        appendLog("记录用量窗口：\(f.string(from: evt.windowStart)) 开始，下次重置 \(f.string(from: evt.nextResetAt))（用量 \(Int(usedPercent))%）")
+        appendLog("记录用量窗口：\(f.string(from: evt.windowStart)) 开始，下次重置 \(f.string(from: evt.nextResetAt))（用量 \(Int(usedPercent))%）",
+                  "Recorded usage window: start \(f.string(from: evt.windowStart)), next reset \(f.string(from: evt.nextResetAt)) (usage \(Int(usedPercent))%)")
     }
 
     private func loadResetHistory() {
@@ -340,7 +355,7 @@ final class AppModel: ObservableObject {
         let recovered = wasLimited && !isLimited
 
         if recovered {
-            appendLog("检测到用量恢复！usedPercent=\(primary?.usedPercent ?? -1)%")
+            appendLog("检测到用量恢复！usedPercent=\(primary?.usedPercent ?? -1)%", "Usage recovered! usedPercent=\(primary?.usedPercent ?? -1)%")
             notify(title: "Codex 用量已恢复", body: "正在自动继续上次暂停的对话…")
             Task { await autoContinueIfNeeded() }
         }
@@ -354,19 +369,19 @@ final class AppModel: ObservableObject {
         refreshPausedThreads()
         let targets = selectedTargets()
         guard !targets.isEmpty else {
-            appendLog("没有勾选的对话，跳过自动继续")
+            appendLog("没有勾选的对话，跳过自动继续", "No chats selected; skipping auto-continue")
             return
         }
         let primary = rateLimits?.rateLimits.primary
         let isRecovered = (primary?.usedPercent ?? 0) < 100 ||
                           (primary?.resetsAt ?? Int.max) <= Int(Date().timeIntervalSince1970)
         guard isRecovered else {
-            appendLog("用量尚未恢复（\(primary?.usedPercent ?? -1)%），等待中…")
+            appendLog("用量尚未恢复（\(primary?.usedPercent ?? -1)%），等待中…", "Usage not recovered yet (\(primary?.usedPercent ?? -1)%), waiting…")
             return
         }
         for paused in targets {
             if engine.alreadyHandled(paused.threadId) {
-                appendLog("已处理过「\(paused.title)」，跳过")
+                appendLog("已处理过「\(paused.title)」，跳过", "Already handled \"\(paused.title)\"; skipping")
                 continue
             }
             await continueOne(paused: paused, auto: true)
@@ -376,7 +391,8 @@ final class AppModel: ObservableObject {
     /// 对单个对话执行继续
     private func continueOne(paused: PausedThread, auto: Bool) async {
         isWorking = true
-        appendLog("\(auto ? "自动" : "手动")继续：\(paused.title)")
+        appendLog("\(auto ? "自动" : "手动")继续：\(paused.title)",
+                  "\(auto ? "Auto" : "Manual") continue: \(paused.title)")
         let ok = await engine.continueThread(
             client: client,
             threadId: paused.threadId,
@@ -398,7 +414,7 @@ final class AppModel: ObservableObject {
         refreshPausedThreads()
         let targets = selectedTargets()
         guard !targets.isEmpty else {
-            appendLog("没有勾选的对话")
+            appendLog("没有勾选的对话", "No chats selected")
             return
         }
         for paused in targets {
@@ -410,7 +426,7 @@ final class AppModel: ObservableObject {
     func openInCodex(threadId: String) {
         guard let url = URL(string: "codex://threads/\(threadId)") else { return }
         NSWorkspace.shared.open(url)
-        appendLog("已在 Codex 中打开对话 \(threadId)")
+        appendLog("已在 Codex 中打开对话 \(threadId)", "Opened chat \(threadId) in Codex")
     }
 
     // MARK: - 辅助功能授权监控（授权后自动重启生效）
@@ -429,11 +445,12 @@ final class AppModel: ObservableObject {
     /// 手动打开系统设置引导授权，并轮询检测；一旦授权完成自动重启本 App
     func openAccessibilitySettings() {
         guard !AppleScriptAutomation.hasAccessibilityPermission() else {
-            appendLog("辅助功能已授权")
+            appendLog("辅助功能已授权", "Accessibility granted")
             return
         }
         AppleScriptAutomation.openAccessibilitySettings()
-        appendLog("请在「系统设置 → 隐私与安全性 → 辅助功能」中勾选本 App，授权后会自动重启生效")
+        appendLog("请在「系统设置 → 隐私与安全性 → 辅助功能」中勾选本 App，授权后会自动重启生效",
+                  "Please check this app in System Settings → Privacy & Security → Accessibility; it will restart automatically once granted")
         accessibilityMonitorTimer?.invalidate()
         accessibilityMonitorTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -449,7 +466,7 @@ final class AppModel: ObservableObject {
 
     /// 授权完成：清理子进程并用 launchctl 重启（由 LaunchAgent 管理）
     private func restartAfterAuthorization() {
-        appendLog("检测到辅助功能已授权，自动重启生效…")
+        appendLog("检测到辅助功能已授权，自动重启生效…", "Accessibility granted detected; restarting to apply…")
         manager.stopOwnServer()
         let uid = getuid()
         let proc = Process()
@@ -458,7 +475,7 @@ final class AppModel: ObservableObject {
         do {
             try proc.run()
         } catch {
-            appendLog("自动重启失败，请手动重启：\(error)")
+            appendLog("自动重启失败，请手动重启：\(error)", "Auto-restart failed; please restart manually: \(error)")
             return
         }
         exit(0)
@@ -466,11 +483,11 @@ final class AppModel: ObservableObject {
 
     // MARK: - 工具
 
-    private func appendLog(_ line: String) {
+    private func appendLog(_ zh: String, _ en: String) {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
         let stamp = formatter.string(from: Date())
-        logLines.append("[\(stamp)] \(line)")
+        logLines.append(LogEntry(time: stamp, zh: zh, en: en))
         if logLines.count > 100 { logLines.removeFirst(logLines.count - 100) }
     }
 
@@ -488,10 +505,11 @@ final class AppModel: ObservableObject {
               let resetsAt = primary.resetsAt else { return nil }
         let now = Date().timeIntervalSince1970
         let remain = Double(resetsAt) - now
-        if remain <= 0 { return "已恢复" }
-        let hours = Int(remain) / 3600
-        let minutes = (Int(remain) % 3600) / 60
-        if hours > 0 { return "\(hours)小时\(minutes)分" }
-        return "\(minutes)分钟"
+        if remain <= 0 { return L("已恢复", "recovered") }
+        let totalMinutes = Int(remain) / 60
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 { return L("\(hours)小时\(minutes)分", "\(hours)h \(minutes)m") }
+        return L("\(minutes)分钟", "\(minutes)m")
     }
 }
