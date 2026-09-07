@@ -12,6 +12,9 @@ command) the moment your usage is back** — so you never have to babysit the
 
 ---
 
+<img width="1024" height="608" alt="image" src="https://github.com/user-attachments/assets/40f2feaf-7a38-46af-827e-1e0e10e99fbc" />
+
+
 ## Why
 
 When a Codex session hits its usage cap, Codex pauses the active conversation
