@@ -1,4 +1,9 @@
 # CodexReset
+
+<img width="417" height="417" alt="image" src="https://github.com/user-attachments/assets/04f38bf8-3a61-4be2-8c75-edb49428d38b" />
+
+
+
 **An app that keeps Codex on the job.**
 
 A tiny macOS menu-bar companion for the **Codex** desktop app. It watches your
