@@ -1,5 +1,6 @@
 # CodexReset
 **An app that keeps Codex on the job.**
+
 A tiny macOS menu-bar companion for the **Codex** desktop app. It watches your
 5-hour / 1-week usage windows, detects conversations that were paused because
 you hit your usage limit, and **automatically resumes them with “继续” (or any
