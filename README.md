@@ -15,7 +15,8 @@ command) the moment your usage is back** — so you never have to babysit the
 
 ---
 
-<img width="1024" height="608" alt="image" src="https://github.com/user-attachments/assets/40f2feaf-7a38-46af-827e-1e0e10e99fbc" />
+<img width="2048" height="1216" alt="image" src="https://github.com/user-attachments/assets/f900bbbb-3828-4848-be41-a4b11ebef48e" />
+
 
 
 ## Why
