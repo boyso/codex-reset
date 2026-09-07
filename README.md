@@ -1,8 +1,6 @@
 # CodexReset
 
-<img width="417" height="417" alt="image" src="https://github.com/user-attachments/assets/04f38bf8-3a61-4be2-8c75-edb49428d38b" />
-
-
+<img width="1280" height="258" alt="image" src="https://github.com/user-attachments/assets/766c58f1-5264-469b-b641-bfe8787caefa" />
 
 **An app that keeps Codex on the job.**
 
