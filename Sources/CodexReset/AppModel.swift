@@ -31,6 +31,16 @@ final class AppModel: ObservableObject {
     }
     @Published var isWorking = false
     @Published var remoteControlEnabled: Bool
+    /// 语言设置：system / zh / en（切换后写回 UserDefaults 并通过 objectWillChange 触发界面刷新）
+    @Published var language: String {
+        didSet {
+            UserDefaults.standard.set(language, forKey: "language")
+            // 默认指令跟随语言：仅当指令仍为内置默认值（继续/Continue）时自动同步切换，用户自定义指令不受影响
+            if continueCommand == "继续" || continueCommand == "Continue" {
+                continueCommand = L("继续", "Continue")
+            }
+        }
+    }
     /// 本 App 是否已获得辅助功能授权（GUI 兜底通道所需；无参检测不弹窗）
     @Published var accessibilityAuthorized: Bool = false
     /// 5 小时窗口时间线（每次用量重置记录一个点）
@@ -51,8 +61,9 @@ final class AppModel: ObservableObject {
         self.reader = SQLiteReader(codexHome: codexHome)
         self.engine = AutoContinueEngine(codexHome: codexHome)
         self.autoContinue = UserDefaults.standard.object(forKey: "autoContinue") as? Bool ?? true
-        self.continueCommand = UserDefaults.standard.string(forKey: "continueCommand") ?? "继续"
+        self.continueCommand = UserDefaults.standard.string(forKey: "continueCommand") ?? L("继续", "Continue")
         self.remoteControlEnabled = CodexConfig.load(codexHome: codexHome).remoteControlEnabled
+        self.language = UserDefaults.standard.string(forKey: "language") ?? "system"
         engine.onLog = { [weak self] zh, en in
             Task { @MainActor in self?.appendLog(zh, en) }
         }

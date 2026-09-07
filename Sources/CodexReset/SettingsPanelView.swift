@@ -5,8 +5,6 @@ struct SettingsPanelView: View {
     @EnvironmentObject var model: AppModel
     /// 是否在概览中显示「全部对话」模块
     @AppStorage("showAllThreads") private var showAllThreads = true
-    /// 语言：system / zh / en
-    @AppStorage("language") private var language = "system"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -22,6 +20,14 @@ struct SettingsPanelView: View {
         .padding(16)
         .frame(width: 340)
         .background(Color(red: 0.95, green: 0.945, blue: 0.93))
+    }
+
+    /// 语言选择绑定到 AppModel.language（切换后经 objectWillChange 刷新全界面）
+    private var languageBinding: Binding<String> {
+        Binding(
+            get: { self.model.language },
+            set: { self.model.language = $0 }
+        )
     }
 
     /// 白色圆角卡片，装设置项
@@ -47,7 +53,7 @@ struct SettingsPanelView: View {
                 Text(L("语言", "Language"))
                     .font(.subheadline)
                 Spacer()
-                Picker("", selection: $language) {
+                Picker("", selection: languageBinding) {
                     Text(L("跟随系统", "System")).tag("system")
                     Text("中文").tag("zh")
                     Text("English").tag("en")

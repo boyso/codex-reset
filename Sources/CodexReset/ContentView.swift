@@ -16,8 +16,6 @@ struct ContentView: View {
     @State private var selectedTab = 0
     /// 是否在概览中显示「全部对话」模块
     @AppStorage("showAllThreads") private var showAllThreads = true
-    /// 语言：system / zh / en
-    @AppStorage("language") private var language = "system"
 
     init(onOpenSettings: (() -> Void)? = nil) {
         self.onOpenSettings = onOpenSettings
@@ -514,7 +512,7 @@ struct ContentView: View {
                 .help(L("展开自定义指令", "Show custom command"))
 
                 if commandExpanded {
-                    TextField(L("继续", "continue"), text: $model.continueCommand)
+                    TextField(L("继续", "Continue"), text: $model.continueCommand)
                         .textFieldStyle(.roundedBorder)
                         .controlSize(.small)
                 }
