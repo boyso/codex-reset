@@ -106,11 +106,23 @@ Then click the menu-bar icon to open the panel. Optionally:
 .build/release/CodexReset --continue <thread_id>     # resume one thread now
 ```
 
+## Keep Mac awake while a selected task is pending (opt-in)
+
+In Settings (gear icon), turn on **Prevent sleep while waiting** / **等待恢复时防止睡眠**.
+
+- When auto-continue is enabled and a **checked** conversation's latest turn has failed with `usageLimitExceeded`, CodexReset temporarily prevents macOS **idle system sleep** while awaiting quota recovery.
+- It also holds the activity while a checked conversation is executing a turn (including after an automatic resume), to avoid going to sleep midway through the task.
+- As soon as no checked task is awaiting quota or running, or you deselect the chat, disable auto-continue, turn off the option, or quit the app, the activity is released. State is rechecked every 30 seconds.
+- **Off by default.** This may drain the battery more quickly. It does not keep the display on, stop lid-close or manual sleep, or protect against battery depletion.
+
+The setting does not change system-wide macOS sleep preferences; it uses a temporary per-process activity.
+
 ## Configuration
 
 | Setting | Where |
 |---|---|
 | Auto-resume on/off | panel toggle `用量恢复后自动继续` |
+| Prevent idle sleep while selected tasks are pending/running | Settings gear → `等待恢复时防止睡眠` (off by default) |
 | Command sent | panel `指令` field (default `继续`) |
 | Which conversations | checkbox list in the panel |
 | `remote_control` | panel toggle (writes `config.toml`) |

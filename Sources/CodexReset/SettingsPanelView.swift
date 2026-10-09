@@ -65,6 +65,41 @@ struct SettingsPanelView: View {
             Divider()
                 .overlay(Color.black.opacity(0.05))
 
+            // Scoped idle-sleep prevention for selected waiting/running chats
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(isOn: $model.keepAwakeForSelectedTasks) {
+                    Text(L("等待恢复时防止睡眠", "Prevent sleep while waiting"))
+                        .font(.subheadline)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+                Text(L("只在已勾选的任务等待额度恢复或正在执行时，防止 Mac 因空闲进入系统睡眠；结束后自动恢复正常睡眠。显示器仍可熄灭。",
+                       "Keep your Mac awake only while a selected task is waiting for quota or running. Normal idle sleep returns automatically afterward; the display may still turn off."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if model.keepAwakeForSelectedTasks {
+                    Label(
+                        model.idleSleepPreventionActive
+                            ? L("正在保持唤醒", "Keeping Mac awake")
+                            : L("待命：没有需要保持唤醒的任务", "Standby: no task requires wakefulness"),
+                        systemImage: model.idleSleepPreventionActive ? "moon.zzz.slash" : "moon.zzz"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(model.idleSleepPreventionActive ? Color.green : Color.secondary)
+                }
+
+                Text(L("可能增加耗电；不会阻止合盖、手动睡眠或电池耗尽。",
+                       "May use more battery. Does not prevent lid-close sleep, manual sleep or battery depletion."))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Divider()
+                .overlay(Color.black.opacity(0.05))
+
             // remote_control
             VStack(alignment: .leading, spacing: 3) {
                 Toggle(isOn: Binding(

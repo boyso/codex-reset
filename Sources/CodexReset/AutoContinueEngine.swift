@@ -82,7 +82,7 @@ struct AppleScriptAutomation {
 final class AutoContinueEngine {
     let codexHome: String
     /// 已处理过的线程，避免重复继续
-    private var handledThreads: Set<String> = []
+    private let handledFailures = HandledFailures()
 
     var onLog: ((String, String) -> Void)?
     /// 需要重启 Codex 以启用 remote_control 时的回调（用于弹通知引导）
@@ -96,8 +96,8 @@ final class AutoContinueEngine {
         self.codexHome = codexHome
     }
 
-    func alreadyHandled(_ threadId: String) -> Bool {
-        handledThreads.contains(threadId)
+    func alreadyHandled(_ threadId: String, failedTurnId: String?) -> Bool {
+        handledFailures.contains(threadId: threadId, failedTurnId: failedTurnId)
     }
 
     /// 继续指定线程。返回是否成功。
@@ -106,14 +106,14 @@ final class AutoContinueEngine {
     ///   - threadId: 目标线程
     ///   - command: 注入的指令（默认「继续」）
     ///   - fallbackToGUI: 是否允许回退 GUI 自动化
-    func continueThread(client: AppServerClient?, threadId: String, command: String, fallbackToGUI: Bool) async -> Bool {
+    func continueThread(client: AppServerClient?, threadId: String, failedTurnId: String? = nil, command: String, fallbackToGUI: Bool) async -> Bool {
         var lastError = "无可用连接"
         lastFailureReason = nil
 
         // Path A1: 使用当前 app-server 客户端（优先桌面 control socket）
         if let client {
             if await tryContinueViaAppServer(client: client, threadId: threadId, command: command) {
-                handledThreads.insert(threadId)
+                handledFailures.record(threadId: threadId, failedTurnId: failedTurnId)
                 return true
             } else {
                 lastError = "app-server 通道失败"
@@ -126,7 +126,7 @@ final class AutoContinueEngine {
             do {
                 try await desktopClient.initialize()
                 if await tryContinueViaAppServer(client: desktopClient, threadId: threadId, command: command) {
-                    handledThreads.insert(threadId)
+                    handledFailures.record(threadId: threadId, failedTurnId: failedTurnId)
                     return true
                 }
                 lastError = "桌面 app-server 通道失败"
@@ -142,7 +142,7 @@ final class AutoContinueEngine {
                     try AppleScriptAutomation.sendContinue(threadId: threadId, command: command)
                     onLog?("已通过 GUI 自动化发送「\(command)」（深链打开对话并粘贴）",
                            "Sent \"\(command)\" via GUI automation (deep-linked into the chat and pasted)")
-                    handledThreads.insert(threadId)
+                    handledFailures.record(threadId: threadId, failedTurnId: failedTurnId)
                     return true
                 } catch {
                     lastError = "GUI 自动化失败: \(error)"

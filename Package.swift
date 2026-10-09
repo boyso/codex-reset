@@ -8,6 +8,7 @@ let package = Package(
         .executableTarget(
             name: "CodexReset",
             path: "Sources/CodexReset"
-        )
+        ),
+        .testTarget(name: "CodexResetTests", dependencies: ["CodexReset"], path: "Tests/CodexResetTests")
     ]
 )
