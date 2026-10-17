@@ -87,9 +87,14 @@ final class AppServerManager {
 
         let ws = WebSocketClient(transport: .tcp(host: "127.0.0.1", port: port))
         let client = AppServerClient(ws: ws)
-        try client.connect()
-        mode = .ownServer
-        return client
+        do {
+            try client.connect()
+            mode = .ownServer
+            return client
+        } catch {
+            stopOwnServer()
+            throw error
+        }
     }
 
     func stopOwnServer() {

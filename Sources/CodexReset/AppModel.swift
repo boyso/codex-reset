@@ -87,22 +87,11 @@ final class AppModel: ObservableObject {
 
     func start() {
         appendLog("CodexReset 启动，CODEX_HOME=\(codexHome)", "CodexReset started, CODEX_HOME=\(codexHome)")
-        // 清理上次残留的 app-server 进程（app 异常退出后其子进程可能仍持有线程写锁）
-        cleanupOrphanAppServers()
+        // Never terminate servers by command-line pattern: other applications own them.
         // 暂停对话列表来自本地 sqlite，不依赖 app-server，立即加载
         refreshPausedThreads()
         refreshAllThreads()
         Task { await connectAndBegin() }
-    }
-
-    /// 杀掉残留的 "codex app-server --listen" 进程并等待其释放线程写锁。
-    /// 桌面 Codex 的 app-server 是 stdio 模式（无 --listen），不会被误杀。
-    private func cleanupOrphanAppServers() {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        proc.arguments = ["-f", "app-server --listen"]
-        try? proc.run()
-        Thread.sleep(forTimeInterval: 1)
     }
 
     func connectAndBegin() async {
