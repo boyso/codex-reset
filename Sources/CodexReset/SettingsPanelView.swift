@@ -11,7 +11,7 @@ struct SettingsPanelView: View {
             HStack {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 15))
-                    .foregroundStyle(Color(red: 0.72, green: 0.33, blue: 0.10))
+                    .foregroundStyle(AppTheme.accent)
                 Text(L("设置", "Settings"))
                     .font(.headline)
             }
@@ -19,18 +19,12 @@ struct SettingsPanelView: View {
         }
         .padding(16)
         .frame(width: 340)
-        .background(Color(red: 0.95, green: 0.945, blue: 0.93))
+        .background(AppTheme.background)
+        // Force dark text/control semantics to match the explicit dark surfaces.
+        .preferredColorScheme(.dark)
     }
 
-    /// 语言选择绑定到 AppModel.language（切换后经 objectWillChange 刷新全界面）
-    private var languageBinding: Binding<String> {
-        Binding(
-            get: { self.model.language },
-            set: { self.model.language = $0 }
-        )
-    }
-
-    /// 白色圆角卡片，装设置项
+    /// Elevated dark settings card.
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             // 显示全部对话
@@ -46,24 +40,40 @@ struct SettingsPanelView: View {
                     "Show all chats in Overview so any chat can be selected for auto-continue."))
 
             Divider()
-                .overlay(Color.black.opacity(0.05))
 
-            // 语言
-            HStack(spacing: 10) {
-                Text(L("语言", "Language"))
-                    .font(.subheadline)
-                Spacer()
-                Picker("", selection: languageBinding) {
-                    Text(L("跟随系统", "System")).tag("system")
-                    Text("中文").tag("zh")
-                    Text("English").tag("en")
+            // Scoped idle-sleep prevention for selected waiting/running chats
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(isOn: $model.keepAwakeForSelectedTasks) {
+                    Text(L("等待恢复时防止睡眠", "Prevent sleep while waiting"))
+                        .font(.subheadline)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 205)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+                Text(L("只在已勾选的任务等待额度恢复或正在执行时，防止 Mac 因空闲进入系统睡眠；结束后自动恢复正常睡眠。显示器仍可熄灭。",
+                       "Keep your Mac awake only while a selected task is waiting for quota or running. Normal idle sleep returns automatically afterward; the display may still turn off."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if model.keepAwakeForSelectedTasks {
+                    Label(
+                        model.idleSleepPreventionActive
+                            ? L("正在保持唤醒", "Keeping Mac awake")
+                            : L("待命：没有需要保持唤醒的任务", "Standby: no task requires wakefulness"),
+                        systemImage: model.idleSleepPreventionActive ? "moon.zzz.slash" : "moon.zzz"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(model.idleSleepPreventionActive ? Color.green : Color.secondary)
+                }
+
+                Text(L("可能增加耗电；不会阻止合盖、手动睡眠或电池耗尽。",
+                       "May use more battery. Does not prevent lid-close sleep, manual sleep or battery depletion."))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             Divider()
-                .overlay(Color.black.opacity(0.05))
 
             // remote_control
             VStack(alignment: .leading, spacing: 3) {
@@ -87,11 +97,11 @@ struct SettingsPanelView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white)
+                .fill(AppTheme.surface)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.07), lineWidth: 1)
+                .strokeBorder(AppTheme.border, lineWidth: 1)
         )
     }
 }

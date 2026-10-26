@@ -97,7 +97,7 @@ final class AppServerClient {
     private static func jsonText(_ obj: [String: Any]) throws -> String {
         let data = try JSONSerialization.data(withJSONObject: obj)
         guard let text = String(data: data, encoding: .utf8) else {
-            throw JSONRPCError(code: -1, message: "JSON 编码失败", data: nil)
+            throw JSONRPCError(code: -1, message: "JSON encoding failed", data: nil)
         }
         return text
     }
@@ -127,7 +127,7 @@ final class AppServerClient {
         if let error = obj["error"] as? [String: Any] {
             cont?.resume(throwing: JSONRPCError(
                 code: error["code"] as? Int ?? -1,
-                message: error["message"] as? String ?? "未知错误",
+                message: error["message"] as? String ?? "Unknown error",
                 data: error["data"]
             ))
         } else if let result = obj["result"] as? [String: Any] {

@@ -21,26 +21,34 @@ final class AppModel: ObservableObject {
     /// 所有对话（含未暂停），可按项目勾选任意对话参与自动继续
     @Published var allThreads: [PausedThread] = []
     /// 勾选、需要在恢复后自动继续的对话
-    @Published var selectedThreadIds: Set<String> = []
+    @Published var selectedThreadIds: Set<String> = [] {
+        didSet {
+            UserDefaults.standard.set(Array(selectedThreadIds), forKey: "selectedThreadIds")
+            updateIdleSleepPrevention()
+        }
+    }
     @Published var logLines: [LogEntry] = []
     @Published var autoContinue: Bool {
-        didSet { UserDefaults.standard.set(autoContinue, forKey: "autoContinue") }
+        didSet {
+            UserDefaults.standard.set(autoContinue, forKey: "autoContinue")
+            updateIdleSleepPrevention()
+        }
     }
+    /// Optional, scoped idle-sleep protection. Off until the user opts in.
+    @Published var keepAwakeForSelectedTasks: Bool {
+        didSet {
+            UserDefaults.standard.set(keepAwakeForSelectedTasks, forKey: "keepAwakeForSelectedTasks")
+            updateIdleSleepPrevention()
+        }
+    }
+    @Published private(set) var idleSleepPreventionActive = false
     @Published var continueCommand: String {
         didSet { UserDefaults.standard.set(continueCommand, forKey: "continueCommand") }
     }
-    @Published var isWorking = false
-    @Published var remoteControlEnabled: Bool
-    /// 语言设置：system / zh / en（切换后写回 UserDefaults 并通过 objectWillChange 触发界面刷新）
-    @Published var language: String {
-        didSet {
-            UserDefaults.standard.set(language, forKey: "language")
-            // 默认指令跟随语言：仅当指令仍为内置默认值（继续/Continue）时自动同步切换，用户自定义指令不受影响
-            if continueCommand == "继续" || continueCommand == "Continue" {
-                continueCommand = L("继续", "Continue")
-            }
-        }
+    @Published var isWorking = false {
+        didSet { updateIdleSleepPrevention() }
     }
+    @Published var remoteControlEnabled: Bool
     /// 本 App 是否已获得辅助功能授权（GUI 兜底通道所需；无参检测不弹窗）
     @Published var accessibilityAuthorized: Bool = false
     /// 5 小时窗口时间线（每次用量重置记录一个点）
@@ -50,20 +58,24 @@ final class AppModel: ObservableObject {
     let manager: AppServerManager
     private let reader: SQLiteReader
     private let engine: AutoContinueEngine
+    private let idleSleepManager = IdleSleepManager()
     private var client: AppServerClient?
     private var timer: Timer?
     /// 记录上一次是否处于「已到上限」状态，用于恢复检测
     private var wasLimited = false
+    private var autoContinueRunning = false
 
     init(codexHome: String = AppModel.defaultCodexHome()) {
         self.codexHome = codexHome
         self.manager = AppServerManager(codexHome: codexHome)
         self.reader = SQLiteReader(codexHome: codexHome)
         self.engine = AutoContinueEngine(codexHome: codexHome)
+        self.selectedThreadIds = Set(UserDefaults.standard.stringArray(forKey: "selectedThreadIds") ?? [])
         self.autoContinue = UserDefaults.standard.object(forKey: "autoContinue") as? Bool ?? true
-        self.continueCommand = UserDefaults.standard.string(forKey: "continueCommand") ?? L("继续", "Continue")
+        self.keepAwakeForSelectedTasks = UserDefaults.standard.bool(forKey: "keepAwakeForSelectedTasks")
+        self.continueCommand = englishContinueCommand(UserDefaults.standard.string(forKey: "continueCommand"))
         self.remoteControlEnabled = CodexConfig.load(codexHome: codexHome).remoteControlEnabled
-        self.language = UserDefaults.standard.string(forKey: "language") ?? "system"
+        UserDefaults.standard.set(self.continueCommand, forKey: "continueCommand")
         engine.onLog = { [weak self] zh, en in
             Task { @MainActor in self?.appendLog(zh, en) }
         }
@@ -87,22 +99,11 @@ final class AppModel: ObservableObject {
 
     func start() {
         appendLog("CodexReset 启动，CODEX_HOME=\(codexHome)", "CodexReset started, CODEX_HOME=\(codexHome)")
-        // 清理上次残留的 app-server 进程（app 异常退出后其子进程可能仍持有线程写锁）
-        cleanupOrphanAppServers()
+        // Never terminate servers by command-line pattern: other applications own them.
         // 暂停对话列表来自本地 sqlite，不依赖 app-server，立即加载
         refreshPausedThreads()
         refreshAllThreads()
         Task { await connectAndBegin() }
-    }
-
-    /// 杀掉残留的 "codex app-server --listen" 进程并等待其释放线程写锁。
-    /// 桌面 Codex 的 app-server 是 stdio 模式（无 --listen），不会被误杀。
-    private func cleanupOrphanAppServers() {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        proc.arguments = ["-f", "app-server --listen"]
-        try? proc.run()
-        Thread.sleep(forTimeInterval: 1)
     }
 
     func connectAndBegin() async {
@@ -164,12 +165,14 @@ final class AppModel: ObservableObject {
 
     /// 退出：清理自起的 app-server 子进程
     func quit() {
+        idleSleepManager.stop()
         manager.stopOwnServer()
         NSApp.terminate(nil)
     }
 
     /// 收到终止信号时的清理（launchd 停止 / kill）
     func stopAndExit() {
+        idleSleepManager.stop()
         manager.stopOwnServer()
         exit(0)
     }
@@ -181,8 +184,10 @@ final class AppModel: ObservableObject {
             let v = enabled ? "true" : "false"
             appendLog("已写入 [features] remote_control = \(v)，请重启 Codex 桌面 app 后生效",
                       "Wrote [features] remote_control = \(v); restart the Codex desktop app to take effect")
-            notify(title: enabled ? "已启用 remote_control" : "已关闭 remote_control",
-                   body: enabled ? "请重启 Codex 桌面 app，之后即可通过官方协议自动继续对话" : "已关闭，之后使用 app-server + GUI 兜底通道")
+            notify(title: enabled ? "remote_control enabled" : "remote_control disabled",
+                   body: enabled
+                       ? "Restart the Codex desktop app to auto-continue via the official local protocol."
+                       : "Auto-continue will use the app-server and GUI fallback channels.")
         } else {
             appendLog("写入 config.toml 失败", "Failed to write config.toml")
         }
@@ -202,10 +207,9 @@ final class AppModel: ObservableObject {
             }
         } catch {
             connectionMode = "none"
-            let zhMsg = "app-server 启动失败: \(error)"
             let enMsg = "app-server failed to start: \(error)"
-            lastError = zhMsg
-            appendLog(zhMsg, enMsg)
+            lastError = enMsg
+            appendLog(enMsg, enMsg)
         }
     }
 
@@ -248,7 +252,7 @@ final class AppModel: ObservableObject {
     private func notifyRestartCodex() {
         appendLog("remote_control 已启用但未生效：请重启 Codex 桌面 app，之后自动继续将走官方协议（无需辅助功能权限）",
                   "remote_control is enabled but not active yet: restart the Codex desktop app so auto-continue uses the official protocol (no accessibility permission needed)")
-        notify(title: "请重启 Codex 桌面 app", body: "remote_control 已开启，重启后本 App 会自动切换到官方协议通道继续对话")
+        notify(title: "Restart Codex desktop app", body: "remote_control is enabled. Restart Codex to switch auto-continue to the official local protocol.")
     }
 
     /// 检测到 remote_control socket 出现时，自动从独立实例切换到桌面 app-server
@@ -280,8 +284,9 @@ final class AppModel: ObservableObject {
             lastError = nil
             checkRecovery(rl)
             trackWindowReset(rl)
+            await autoContinueIfNeeded()
         } catch {
-            lastError = "读取用量失败: \(error)"
+            lastError = "Failed to read usage: \(error)"
             appendLog("读取用量失败: \(error)", "Failed to read usage: \(error)")
         }
     }
@@ -336,6 +341,35 @@ final class AppModel: ObservableObject {
     /// 刷新暂停对话列表（不自动勾选；勾选完全由用户控制）
     func refreshPausedThreads() {
         pausedThreads = reader.usageLimitedThreads()
+        updateIdleSleepPrevention()
+    }
+
+    /// Assert only when an opted-in selected chat has a pending quota failure or
+    /// an active turn; release automatically on completion/deselection/disable.
+    private func updateIdleSleepPrevention() {
+        let monitoring = keepAwakeForSelectedTasks && autoContinue && !selectedThreadIds.isEmpty
+        let hasPendingFailure = monitoring && pausedThreads.contains {
+            selectedThreadIds.contains($0.threadId)
+        }
+        let hasRunningTurn = monitoring &&
+            !reader.activeThreadIds(for: selectedThreadIds).isEmpty
+        let shouldPrevent = IdleSleepPolicy.shouldPreventIdleSleep(
+            enabled: keepAwakeForSelectedTasks,
+            autoContinueEnabled: autoContinue,
+            hasSelectedQuotaFailure: hasPendingFailure,
+            hasSelectedRunningTurn: hasRunningTurn,
+            isSendingContinue: isWorking && !selectedThreadIds.isEmpty
+        )
+        guard idleSleepManager.setActive(shouldPrevent) else { return }
+        idleSleepPreventionActive = idleSleepManager.isActive
+        appendLog(
+            shouldPrevent
+                ? "已阻止 Mac 因空闲进入睡眠（已勾选任务等待恢复或正在执行）"
+                : "已释放防空闲睡眠限制（没有需要等待或执行的已勾选任务）",
+            shouldPrevent
+                ? "Preventing idle system sleep for a selected waiting or running task"
+                : "Released idle sleep protection; no selected task requires it"
+        )
     }
 
     /// 刷新「全部对话」列表（面板每次打开时调用）
@@ -343,56 +377,46 @@ final class AppModel: ObservableObject {
         allThreads = reader.allThreads()
     }
 
-    /// 所有勾选的对话（暂停 + 全部，按 threadId 去重，保持最新在前）
-    private func selectedTargets() -> [PausedThread] {
+    /// Automatic recovery must never target merely selected, already-completed conversations.
+    private func selectedTargets(onlyUsageLimited: Bool = false) -> [PausedThread] {
         var seen = Set<String>()
         var result: [PausedThread] = []
-        for t in pausedThreads where selectedThreadIds.contains(t.threadId) {
-            if seen.insert(t.threadId).inserted { result.append(t) }
-        }
-        for t in allThreads where selectedThreadIds.contains(t.threadId) {
+        let candidates = onlyUsageLimited ? pausedThreads : pausedThreads + allThreads
+        for t in candidates where selectedThreadIds.contains(t.threadId) {
             if seen.insert(t.threadId).inserted { result.append(t) }
         }
         return result
     }
 
-    /// 用量恢复检测 + 自动继续
-    private func checkRecovery(_ rl: AccountRateLimits) {
-        let now = Int(Date().timeIntervalSince1970)
-        let primary = rl.rateLimits.primary
-        let isLimited = (rl.rateLimits.rateLimitReachedType != nil &&
-                         rl.rateLimits.rateLimitReachedType != "none") ||
-                        (primary?.usedPercent ?? 0) >= 100
-        let recovered = wasLimited && !isLimited
-
-        if recovered {
-            appendLog("检测到用量恢复！usedPercent=\(primary?.usedPercent ?? -1)%", "Usage recovered! usedPercent=\(primary?.usedPercent ?? -1)%")
-            notify(title: "Codex 用量已恢复", body: "正在自动继续上次暂停的对话…")
-            Task { await autoContinueIfNeeded() }
-        }
-        wasLimited = isLimited
-        _ = now
+    private func isRateLimited(_ rl: AccountRateLimits) -> Bool {
+        let reachedType = rl.rateLimits.rateLimitReachedType
+        return (reachedType != nil && reachedType != "none") ||
+            (rl.rateLimits.primary?.usedPercent ?? 0) >= 100 ||
+            (rl.rateLimits.secondary?.usedPercent ?? 0) >= 100
     }
 
-    /// 到点自动继续：对所有勾选的对话（暂停 + 全部）逐个发送「继续」
+    /// 用量恢复检测 + 自动继续
+    private func checkRecovery(_ rl: AccountRateLimits) {
+        let primary = rl.rateLimits.primary
+        let isLimited = isRateLimited(rl)
+        if wasLimited && !isLimited {
+            appendLog("检测到用量恢复！usedPercent=\(primary?.usedPercent ?? -1)%",
+                      "Usage recovered! usedPercent=\(primary?.usedPercent ?? -1)%")
+            notify(title: "Codex usage available", body: "Checking chats still paused by usage limits…")
+        }
+        wasLimited = isLimited
+    }
+
+    /// Recheck on each usage poll so relaunching after a reset doesn't miss a pending failure.
+    /// A handled failure never runs twice; a later failure in the same thread can resume again.
     func autoContinueIfNeeded() async {
-        guard autoContinue else { return }
+        guard autoContinue, !selectedThreadIds.isEmpty, !autoContinueRunning,
+              let rl = rateLimits, !isRateLimited(rl) else { return }
+        autoContinueRunning = true
+        defer { autoContinueRunning = false }
         refreshPausedThreads()
-        let targets = selectedTargets()
-        guard !targets.isEmpty else {
-            appendLog("没有勾选的对话，跳过自动继续", "No chats selected; skipping auto-continue")
-            return
-        }
-        let primary = rateLimits?.rateLimits.primary
-        let isRecovered = (primary?.usedPercent ?? 0) < 100 ||
-                          (primary?.resetsAt ?? Int.max) <= Int(Date().timeIntervalSince1970)
-        guard isRecovered else {
-            appendLog("用量尚未恢复（\(primary?.usedPercent ?? -1)%），等待中…", "Usage not recovered yet (\(primary?.usedPercent ?? -1)%), waiting…")
-            return
-        }
-        for paused in targets {
-            if engine.alreadyHandled(paused.threadId) {
-                appendLog("已处理过「\(paused.title)」，跳过", "Already handled \"\(paused.title)\"; skipping")
+        for paused in selectedTargets(onlyUsageLimited: true) {
+            if engine.alreadyHandled(paused.threadId, failedTurnId: paused.failedTurnId) {
                 continue
             }
             await continueOne(paused: paused, auto: true)
@@ -407,16 +431,17 @@ final class AppModel: ObservableObject {
         let ok = await engine.continueThread(
             client: client,
             threadId: paused.threadId,
+            failedTurnId: paused.failedTurnId,
             command: continueCommand,
             fallbackToGUI: true
         )
         isWorking = false
         if ok {
-            notify(title: "Codex 已继续", body: "已对「\(paused.title)」发送「\(continueCommand)」")
+            notify(title: "Codex resumed", body: "Sent command to \(paused.title): \(continueCommand)")
         } else {
             // 手动/自动失败都要明确反馈（辅助功能引导走 engine.onNeedAccessibility 通知，不自动弹系统设置）
-            let reason = engine.lastFailureReason ?? "未知原因"
-            notify(title: "继续失败", body: "「\(paused.title)」\n\(reason)")
+            let reason = engine.lastFailureReason ?? "Unknown reason"
+            notify(title: "Continue failed", body: "Chat: \(paused.title)\nReason: \(reason)")
         }
     }
 
@@ -449,7 +474,7 @@ final class AppModel: ObservableObject {
         accessibilityAuthorized = AppleScriptAutomation.hasAccessibilityPermission()
         let note = NSUserNotification()
         note.title = "CodexReset"
-        note.informativeText = "辅助功能未授权，无法在 Codex 中输入「继续」。请点面板「授权辅助功能」勾选本 App（若勾选过仍提示，请重新勾选一次）。"
+        note.informativeText = "Accessibility permission is missing. Open CodexReset, select Grant under Accessibility, and enable this app in System Settings. If already enabled, toggle permission off and on again."
         NSUserNotificationCenter.default.deliver(note)
     }
 

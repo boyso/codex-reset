@@ -93,12 +93,12 @@ final class WebSocketClient {
         while buffer.range(of: terminator) == nil {
             var byte: UInt8 = 0
             let n = read(fd, &byte, 1)
-            if n <= 0 { throw Error.handshakeFailed("handshake 期间连接关闭") }
+            if n <= 0 { throw Error.handshakeFailed("Connection closed during handshake") }
             buffer.append(byte)
         }
         guard let header = String(data: buffer, encoding: .utf8),
               header.hasPrefix("HTTP/1.1 101") else {
-            throw Error.handshakeFailed(String(data: buffer, encoding: .utf8) ?? "无效握手响应")
+            throw Error.handshakeFailed(String(data: buffer, encoding: .utf8) ?? "Invalid handshake response")
         }
     }
 
@@ -141,7 +141,7 @@ final class WebSocketClient {
 
     private static func openTCP(host: String, port: UInt16) throws -> Int32 {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw Error.connectionFailed("socket() 失败") }
+        guard fd >= 0 else { throw Error.connectionFailed("socket() failed") }
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = CFSwapInt16HostToBig(port)
@@ -153,21 +153,21 @@ final class WebSocketClient {
         }
         if rc != 0 {
             Darwin.close(fd)
-            throw Error.connectionFailed("TCP 连接失败 errno=\(errno)")
+            throw Error.connectionFailed("TCP connection failed, errno=\(errno)")
         }
         return fd
     }
 
     private static func openUnix(path: String) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw Error.connectionFailed("socket() 失败") }
+        guard fd >= 0 else { throw Error.connectionFailed("socket() failed") }
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = Array(path.utf8)
         let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
         guard pathBytes.count < maxLen else {
             Darwin.close(fd)
-            throw Error.connectionFailed("socket 路径过长")
+            throw Error.connectionFailed("Socket path too long")
         }
         withUnsafeMutablePointer(to: &addr.sun_path) { sunPath in
             sunPath.withMemoryRebound(to: UInt8.self, capacity: maxLen) { buf in
@@ -182,7 +182,7 @@ final class WebSocketClient {
         }
         if rc != 0 {
             Darwin.close(fd)
-            throw Error.connectionFailed("Unix socket 连接失败 errno=\(errno)")
+            throw Error.connectionFailed("Unix socket connection failed, errno=\(errno)")
         }
         return fd
     }

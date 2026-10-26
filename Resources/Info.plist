@@ -31,7 +31,7 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>用于自动控制 Codex 桌面 app 继续对话（GUI 自动化回退通道）</string>
+    <string>Allows CodexReset to control the Codex desktop app and resume conversations using GUI automation when needed.</string>
     <key>NSHumanReadableCopyright</key>
     <string>CodexReset</string>
 </dict>

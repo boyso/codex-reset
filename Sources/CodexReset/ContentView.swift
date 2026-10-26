@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// 强调橙：浅色主题下的主色（按钮/恢复时间高亮），保证白字按钮对比与文字可读
-private let highlightOrange = Color(red: 0.72, green: 0.33, blue: 0.10)
-
-/// 主面板：单屏展示用量、倒计时、暂停对话与操作（浅色轻拟物主题）
+/// Menu-bar panel: quota, reset countdown, selected chats, and resume controls.
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
     /// 右上角「设置」回调（由 MenuBarController 注入：打开独立设置窗口）
@@ -41,9 +38,9 @@ struct ContentView: View {
         }
         .padding(14)
         .frame(width: 380, height: 720, alignment: .top)
-        // 浅色主题：全不透明浅色背景
-        .background(Color(red: 0.95, green: 0.945, blue: 0.93))
-        .preferredColorScheme(.light)
+        // Always render matching dark colors and system controls, even on a light macOS desktop.
+        .background(AppTheme.background)
+        .preferredColorScheme(.dark)
         .onAppear { model.refreshAllThreads() }
     }
 
@@ -421,7 +418,7 @@ struct ContentView: View {
                     Text(cleanHint(hint))
                         .font(.caption)
                         .fontWeight(.semibold)
-                        .foregroundStyle(highlightOrange)
+                        .foregroundStyle(AppTheme.accent)
                 }
             }
             .contentShape(Rectangle())
@@ -439,26 +436,20 @@ struct ContentView: View {
         hint.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
     }
 
-    // MARK: - 控制（自动继续模块，轻拟物主卡片：纯白、不使用阴影）
+    // MARK: - Controls
 
-    /// 轻拟物卡片：纯白背景 + 细描边（无渐变、无阴影）
+    /// Elevated dark card with an explicit outline so it stays distinct from the panel.
     private func softCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10, content: content)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white)
+                    .fill(AppTheme.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [Color.white, Color.black.opacity(0.06)],
-                            startPoint: .top, endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
+                    .strokeBorder(AppTheme.border, lineWidth: 1)
             )
     }
 
@@ -482,7 +473,6 @@ struct ContentView: View {
             }
 
             Divider()
-                .overlay(Color.black.opacity(0.05))
 
             // 指令输入（默认收起，点标题展开）
             VStack(alignment: .leading, spacing: 6) {
@@ -541,7 +531,7 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [Color(red: 0.86, green: 0.45, blue: 0.15), highlightOrange],
+                                colors: [AppTheme.buttonTop, AppTheme.buttonBottom],
                                 startPoint: .top, endPoint: .bottom
                             )
                         )
@@ -584,7 +574,7 @@ struct ContentView: View {
                 }
                 .frame(maxHeight: 400)
                 .frame(maxWidth: .infinity)
-                .background(Color.black.opacity(0.03))
+                .background(AppTheme.inset)
                 .cornerRadius(6)
             }
         }

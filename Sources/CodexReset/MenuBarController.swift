@@ -134,6 +134,8 @@ final class MenuBarController: NSObject {
             }
             let win = NSWindow(contentViewController: hosting)
             win.title = L("CodexReset 设置", "CodexReset Settings")
+            // Match the SwiftUI dark Settings view, including the native title bar.
+            win.appearance = NSAppearance(named: .darkAqua)
             win.styleMask = [.titled, .closable, .utilityWindow]
             win.isReleasedWhenClosed = false
             win.isMovableByWindowBackground = true

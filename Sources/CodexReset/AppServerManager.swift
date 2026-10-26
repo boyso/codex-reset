@@ -82,14 +82,19 @@ final class AppServerManager {
         }
         if !ready {
             proc.terminate()
-            throw WebSocketClient.Error.connectionFailed("独立 app-server 启动超时: \(lastSpawnError ?? "无输出")")
+            throw WebSocketClient.Error.connectionFailed("Standalone app-server startup timed out: \(lastSpawnError ?? "no output")")
         }
 
         let ws = WebSocketClient(transport: .tcp(host: "127.0.0.1", port: port))
         let client = AppServerClient(ws: ws)
-        try client.connect()
-        mode = .ownServer
-        return client
+        do {
+            try client.connect()
+            mode = .ownServer
+            return client
+        } catch {
+            stopOwnServer()
+            throw error
+        }
     }
 
     func stopOwnServer() {
@@ -132,7 +137,7 @@ final class AppServerManager {
             }
         }
         guard bindResult == 0 else {
-            throw WebSocketClient.Error.connectionFailed("bind 失败")
+            throw WebSocketClient.Error.connectionFailed("bind failed")
         }
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
         var out = sockaddr_in()
